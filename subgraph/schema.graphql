@@ -1,0 +1,9 @@
+type LogEntry @entity(immutable: false) {
+  id: ID!
+  txHash: Bytes!
+  sender: Bytes!
+  data: String!
+  timestamp: BigInt!
+  contractAddress: Bytes!
+  chainId: BigInt!
+}

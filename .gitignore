@@ -1,0 +1,17 @@
+# Node.js
+node_modules
+
+# Env
+.env
+.env.*.local
+
+# Hardhat
+contracts/cache
+contracts/artifacts
+
+# Vite
+app/dist
+
+# The Graph
+subgraph/generated
+subgraph/build
