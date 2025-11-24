@@ -61,6 +61,7 @@ function App() {
   const [logs, setLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [txHash, setTxHash] = useState("");
+  const [balance, setBalance] = useState("");
 
   const networkOk = useMemo(() => !isActive || chainId === TARGET_CHAIN_ID, [isActive, chainId]);
 
@@ -131,6 +132,29 @@ function App() {
     fetchLogs();
   }, []);
 
+  useEffect(() => {
+    const loadBalance = async () => {
+      if (!account) {
+        setBalance("");
+        return;
+      }
+      const externalProvider = metaMask.provider || provider || window.ethereum;
+      if (!externalProvider || typeof externalProvider.request !== "function") {
+        setBalance("");
+        return;
+      }
+      try {
+        const browserProvider = new ethers.BrowserProvider(externalProvider);
+        const raw = await browserProvider.getBalance(account);
+        setBalance(parseFloat(ethers.formatEther(raw)).toFixed(4));
+      } catch (error) {
+        console.error("Failed to load balance", error);
+        setBalance("");
+      }
+    };
+    loadBalance();
+  }, [account, provider]);
+
   return (
     <div className="page">
       <header className="header">
@@ -144,6 +168,7 @@ function App() {
             <>
               <span className="badge success">{networkOk ? "已连接" : "网络不匹配"}</span>
               <div className="address">{formatHex(account ?? "")}</div>
+              {balance && <div className="address">余额: {balance} ETH</div>}
               <button className="ghost" onClick={disconnectWallet}>
                 断开
               </button>
