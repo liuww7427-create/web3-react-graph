@@ -7,3 +7,14 @@ type LogEntry @entity(immutable: false) {
   contractAddress: Bytes!
   chainId: BigInt!
 }
+
+type TransferEntry @entity(immutable: false) {
+  id: ID!
+  txHash: Bytes!
+  from: Bytes!
+  to: Bytes!
+  amount: BigInt!
+  timestamp: BigInt!
+  contractAddress: Bytes!
+  chainId: BigInt!
+}

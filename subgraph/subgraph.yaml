@@ -6,7 +6,7 @@ dataSources:
     name: LogStorage
     network: sepolia
     source:
-      address: "0x262A8669334eE0001295b15a8076E3A3B694E4dc" # replace with deployed address
+      address: "0x8C7488B67Fcc38Ef2d88946B58a8b26e327b721E" # replace with deployed address
       abi: LogStorage
       startBlock: 0
     mapping:
@@ -15,10 +15,13 @@ dataSources:
       language: wasm/assemblyscript
       entities:
         - LogEntry
+        - TransferEntry
       abis:
         - name: LogStorage
           file: ./abis/LogStorage.json
       eventHandlers:
         - event: DataLogged(indexed address,indexed uint256,string,uint256)
           handler: handleDataLogged
+        - event: TransferLogged(indexed address,indexed address,uint256,uint256)
+          handler: handleTransferLogged
       file: ./src/mapping.ts

@@ -52,6 +52,12 @@ npm run dev
 ```
 打开本地地址，连接 MetaMask，输入文本发送交易。前端会展示最近交易哈希，并从 The Graph 读取最新日志（包含 id、Tx Hash、合约地址、链 ID、时间）。
 
+## 两种上链方式
+- 方式一：通过合约方法 `transferWithLog` 转账，事件 `TransferLogged` 会被 Subgraph 记录，可查询转账信息。
+- 方式二：调用合约 `logData` 写入字符串，触发事件供 Subgraph 读取。
+
+> 合约有更新，重新部署后记得更新前端 `.env` 的 `VITE_CONTRACT_ADDRESS`，并在 `subgraph/subgraph.yaml` 中替换为新地址后执行 `npm run codegen && npm run build` 再部署子图。
+
 ## Subgraph 查询示例
 ```graphql
 query Latest {

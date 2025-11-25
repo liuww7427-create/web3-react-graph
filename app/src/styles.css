@@ -118,6 +118,11 @@ button:disabled {
   margin-top: 12px;
 }
 
+.transfer-form {
+  grid-template-columns: 1.4fr 0.8fr auto;
+  align-items: center;
+}
+
 input {
   padding: 12px 14px;
   border-radius: 12px;
@@ -146,6 +151,10 @@ input {
   display: grid;
   gap: 12px;
   margin-top: 14px;
+}
+
+.subsection {
+  margin-top: 12px;
 }
 
 .item {
@@ -227,6 +236,9 @@ input {
     align-items: flex-start;
   }
   .form {
+    grid-template-columns: 1fr;
+  }
+  .transfer-form {
     grid-template-columns: 1fr;
   }
   .item-footer {
