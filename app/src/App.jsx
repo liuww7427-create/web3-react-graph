@@ -7,10 +7,10 @@ import LogForm from "./components/LogForm";
 
 const { useAccount, useChainId, useIsActive, useIsActivating, useProvider } = metaMaskHooks; // web3-react hooks
 
-// GraphQL 查询：同时读取日志和转账记录
+// GraphQL 查询：同时读取日志和转账记录，支持分页
 const LOG_QUERY = gql`
-  query LatestLogs($first: Int!) {
-    logEntries(first: $first, orderBy: timestamp, orderDirection: desc) {
+  query LatestLogs($logFirst: Int!, $logSkip: Int!, $transferFirst: Int!, $transferSkip: Int!) {
+    logEntries(first: $logFirst, skip: $logSkip, orderBy: timestamp, orderDirection: desc) {
       id
       txHash
       sender
@@ -19,7 +19,7 @@ const LOG_QUERY = gql`
       contractAddress
       chainId
     }
-    transferEntries(first: $first, orderBy: timestamp, orderDirection: desc) {
+    transferEntries(first: $transferFirst, skip: $transferSkip, orderBy: timestamp, orderDirection: desc) {
       id
       txHash
       from
@@ -32,9 +32,22 @@ const LOG_QUERY = gql`
   }
 `;
 
+// 统计总数（简单方案：最多计数 1000 条）
+const COUNT_QUERY = gql`
+  query CountLogs {
+    logEntries(first: 1000, orderBy: timestamp, orderDirection: desc) {
+      id
+    }
+    transferEntries(first: 1000, orderBy: timestamp, orderDirection: desc) {
+      id
+    }
+  }
+`;
+
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || ""; // 合约地址
 const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || ""; // 子图查询端点
 const TARGET_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 11155111); // 目标链 ID，默认 Sepolia
+const PAGE_SIZE = 5; // 每页条数
 
 const CONTRACT_ABI = [
   {
@@ -98,6 +111,12 @@ function App() {
   const [balance, setBalance] = useState(""); // 余额
   const [transferTo, setTransferTo] = useState(""); // 转账接收地址
   const [transferAmount, setTransferAmount] = useState(""); // 转账金额
+  const [logPage, setLogPage] = useState(0); // 日志当前页
+  const [transferPage, setTransferPage] = useState(0); // 转账当前页
+  const [logHasNext, setLogHasNext] = useState(false); // 日志是否有下一页
+  const [transferHasNext, setTransferHasNext] = useState(false); // 转账是否有下一页
+  const [logTotal, setLogTotal] = useState(0); // 日志总数
+  const [transferTotal, setTransferTotal] = useState(0); // 转账总数
 
   const networkOk = useMemo(() => !isActive || chainId === TARGET_CHAIN_ID, [isActive, chainId]); // 链匹配校验
 
@@ -151,6 +170,7 @@ function App() {
       const receipt = await tx.wait();
       setLogStatus(`已上链：${receipt.hash}`);
       setInput("");
+      setLogPage(0); // 重置分页到第一页
       await fetchLogs();
     } catch (error) {
       console.error(error);
@@ -193,6 +213,7 @@ function App() {
       const receipt = await tx.wait();
       setTransferStatus(`转账完成：${receipt.hash}`);
       setTransferAmount("");
+      setTransferPage(0); // 重置分页到第一页
       await fetchLogs();
     } catch (error) {
       console.error(error);
@@ -205,11 +226,40 @@ function App() {
     console.info("[subgraph] fetching from", SUBGRAPH_URL);
     setLoadingLogs(true);
     try {
-      const data = await request(SUBGRAPH_URL, LOG_QUERY, { first: 20 }); // 调用子图
+      const logSkip = logPage * PAGE_SIZE; // 日志跳过数量
+      const transferSkip = transferPage * PAGE_SIZE; // 转账跳过数量
+      const countPromise = request(SUBGRAPH_URL, COUNT_QUERY).catch((err) => {
+        console.error("[subgraph] count fetch failed", err);
+        return null;
+      });
+      const dataPromise = request(SUBGRAPH_URL, LOG_QUERY, {
+        logFirst: PAGE_SIZE + 1, // 多查一条用于判断是否有下一页
+        logSkip,
+        transferFirst: PAGE_SIZE + 1,
+        transferSkip
+      }); // 调用子图
+
+      const [countData, data] = await Promise.all([countPromise, dataPromise]);
       console.info("[subgraph] data received", data);
       
-      setLogs(data.logEntries || []); // 设置日志列表
-      setTransfers(data.transferEntries || []); // 设置转账列表
+      const logList = data.logEntries || [];
+      const transferList = data.transferEntries || [];
+
+      setLogHasNext(logList.length > PAGE_SIZE);
+      setTransferHasNext(transferList.length > PAGE_SIZE);
+
+      const logTotalCount =
+        (countData && countData.logEntries ? countData.logEntries.length : null) ??
+        logList.length + logSkip;
+      const transferTotalCount =
+        (countData && countData.transferEntries ? countData.transferEntries.length : null) ??
+        transferList.length + transferSkip;
+
+      setLogTotal(logTotalCount);
+      setTransferTotal(transferTotalCount);
+
+      setLogs(logList.slice(0, PAGE_SIZE)); // 设置日志列表
+      setTransfers(transferList.slice(0, PAGE_SIZE)); // 设置转账列表
     } catch (error) {
       console.error("[subgraph] fetch failed", error);
       setLogStatus("读取 Subgraph 失败，请检查 VITE_SUBGRAPH_URL");
@@ -220,7 +270,7 @@ function App() {
 
   useEffect(() => {
     fetchLogs(); // 组件加载时自动读取子图
-  }, []);
+  }, [logPage, transferPage]); // 翻页时重新读取
 
   useEffect(() => {
     const loadBalance = async () => {
@@ -311,80 +361,119 @@ function App() {
         </div>
         <div className="subsection">
           <div className="eyebrow">合约日志</div>
+          <div className="table-head">
+            <div className="th wide">内容 / Tx</div>
+            <div className="th">链 ID</div>
+            <div className="th">时间</div>
+          </div>
           <div className="grid">
             {logs.map((log) => (
-              <article className="item" key={log.id}>
-                <div className="item-row">
-                  <span className="pill">ID {log.id}</span>
-                  <span className="pill muted">链 ID {log.chainId}</span>
-                </div>
-                <div className="item-data">{log.data}</div>
-                <div className="item-meta">
-                  <div>
-                    <span className="label">Sender</span>
-                    <span className="value">{formatHex(log.sender)}</span>
+              <article className="item item-split" key={log.id}>
+                <div className="item-col">
+                  <div className="item-row">
+                    <span className="pill strong">ID {log.id}</span>
+                    <span className="pill muted">链 ID {log.chainId}</span>
                   </div>
-                  <div>
-                    <span className="label">Tx</span>
-                    <a
-                      className="value link"
-                      href={`https://sepolia.etherscan.io/tx/${log.txHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {formatHex(log.txHash)}
-                    </a>
+                  <div className="item-data">{log.data}</div>
+                  <div className="item-meta duo">
+                    <div>
+                      <span className="label">Sender</span>
+                      <span className="value">{formatHex(log.sender)}</span>
+                    </div>
+                    <div>
+                      <span className="label">Tx</span>
+                      <a
+                        className="value link"
+                        href={`https://sepolia.etherscan.io/tx/${log.txHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {formatHex(log.txHash)}
+                      </a>
+                    </div>
                   </div>
                 </div>
-                <div className="item-footer">
-                  <span className="label">Contract</span>
-                  <span className="value">{formatHex(log.contractAddress)}</span>
-                  <span className="time">
-                    {new Date(Number(log.timestamp) * 1000).toLocaleString()}
-                  </span>
+                <div className="item-col right">
+                  <div className="label">Contract</div>
+                  <div className="value">{formatHex(log.contractAddress)}</div>
+                  <div className="time">{new Date(Number(log.timestamp) * 1000).toLocaleString()}</div>
                 </div>
               </article>
             ))}
             {!loadingLogs && logs.length === 0 && <div className="empty">暂无日志，先写一条吧。</div>}
           </div>
+          <div className="pager pager-right">
+            <button className="ghost" disabled={logPage === 0 || loadingLogs} onClick={() => setLogPage((p) => Math.max(0, p - 1))}>
+              上一页
+            </button>
+            <span className="page-info">
+              第 {logPage + 1} 页 / 共 {Math.max(1, Math.ceil(logTotal / PAGE_SIZE))} 页 · {logTotal} 条
+            </span>
+            <button className="ghost" disabled={!logHasNext || loadingLogs} onClick={() => setLogPage((p) => p + 1)}>
+              下一页
+            </button>
+          </div>
         </div>
 
         <div className="subsection">
           <div className="eyebrow">转账记录</div>
+          <div className="table-head">
+            <div className="th wide">From / To / Tx</div>
+            <div className="th">金额</div>
+            <div className="th">时间</div>
+          </div>
           <div className="grid">
             {transfers.map((t) => (
-              <article className="item" key={t.id}>
-                <div className="item-row">
-                  <span className="pill">{ethers.formatEther(t.amount || "0")} ETH</span>
-                  <span className="pill muted">链 ID {t.chainId}</span>
-                </div>
-                <div className="item-meta">
-                  <div>
-                    <span className="label">From</span>
-                    <span className="value">{formatHex(t.from)}</span>
+              <article className="item item-split" key={t.id}>
+                <div className="item-col">
+                  <div className="item-row">
+                    <span className="pill strong">{ethers.formatEther(t.amount || "0")} ETH</span>
+                    <span className="pill muted">链 ID {t.chainId}</span>
                   </div>
-                  <div>
-                    <span className="label">To</span>
-                    <span className="value">{formatHex(t.to)}</span>
+                  <div className="item-meta duo">
+                    <div>
+                      <span className="label">From</span>
+                      <span className="value">{formatHex(t.from)}</span>
+                    </div>
+                    <div>
+                      <span className="label">To</span>
+                      <span className="value">{formatHex(t.to)}</span>
+                    </div>
+                  </div>
+                  <div className="item-meta">
+                    <div>
+                      <span className="label">Tx</span>
+                      <a
+                        className="value link"
+                        href={`https://sepolia.etherscan.io/tx/${t.txHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {formatHex(t.txHash)}
+                      </a>
+                    </div>
                   </div>
                 </div>
-                <div className="item-footer">
-                  <span className="label">Tx</span>
-                  <a
-                    className="value link"
-                    href={`https://sepolia.etherscan.io/tx/${t.txHash}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {formatHex(t.txHash)}
-                  </a>
-                  <span className="time">{new Date(Number(t.timestamp) * 1000).toLocaleString()}</span>
+                <div className="item-col right">
+                  <div className="label">时间</div>
+                  <div className="time">{new Date(Number(t.timestamp) * 1000).toLocaleString()}</div>
                 </div>
               </article>
             ))}
             {!loadingLogs && transfers.length === 0 && (
               <div className="empty">暂无转账记录，先转一笔吧。</div>
             )}
+          </div>
+          <div className="pager pager-right">
+            <button className="ghost" disabled={transferPage === 0 || loadingLogs} onClick={() => setTransferPage((p) => Math.max(0, p - 1))}>
+              上一页
+            </button>
+            <span className="page-info">
+              第 {transferPage + 1} 页 / 共 {Math.max(1, Math.ceil(transferTotal / PAGE_SIZE))} 页 · {transferTotal} 条
+            </span>
+            <button className="ghost" disabled={!transferHasNext || loadingLogs} onClick={() => setTransferPage((p) => p + 1)}>
+              下一页
+            </button>
           </div>
         </div>
       </section>
